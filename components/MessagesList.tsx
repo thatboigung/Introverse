@@ -64,7 +64,7 @@ export default function MessagesList({ onSelectConversation }: MessagesListProps
   const loadConversations = async () => {
     // Get user's name and profile picture
     const profile = await getUserProfile();
-    const userName = profile?.name || 'You';
+    const userName = profile?.name || 'Diary';
     
     // Load profile picture from IndexedDB
     if (profile?.profilePicture) {
@@ -73,7 +73,7 @@ export default function MessagesList({ onSelectConversation }: MessagesListProps
 
     const predefinedConversations: Conversation[] = [
       { id: 'you', name: userName, isLabel: false },
-      { id: 'you2', name: 'You', isLabel: false },
+      { id: 'you2', name: 'Diary', isLabel: false },
       { id: 'notes', name: 'Notes', isLabel: false },
       { id: 'reminders', name: 'Reminders', isLabel: false },
     ];
