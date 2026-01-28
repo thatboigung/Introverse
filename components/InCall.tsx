@@ -1,9 +1,11 @@
-import { getUserProfile, Recording, saveRecording } from '@/utils/storage';
-import { Platform } from 'react-native';
+import { useTheme } from '@/contexts/ThemeContext';
 import { useCrossPlatformRecorder } from '@/hooks/useCrossPlatformRecorder';
+import { getUserProfile, Recording, saveRecording } from '@/utils/storage';
 import { Mic, MicOff, PhoneOff } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import { useTheme } from '@/contexts/ThemeContext';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
+import { Audio as ExpoAudio } from 'expo-av';
 
 interface InCallProps {
   onEndCall: (callDuration: number, hasRecording: boolean, recordingId?: string) => void;
@@ -26,9 +28,12 @@ export default function InCall({ onEndCall, number, contactName: propContactName
   const [callStatus, setCallStatus] = useState<'calling' | 'connected' | 'failed'>('calling');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const unavailableSoundRef = useRef<ExpoAudio.Sound | null>(null);
+  const unavailableTone = useRef(require('../assets/sound/unavailable-phone-192489.mp3')).current;
 
   // Hide navbar during call
   useEffect(() => {
+    if (Platform.OS !== 'web') return;
     const tabBar = document.querySelector('[role="tablist"]') as HTMLElement;
     if (tabBar) {
       tabBar.style.display = 'none';
@@ -111,6 +116,32 @@ export default function InCall({ onEndCall, number, contactName: propContactName
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callStatus]);
+
+  useEffect(() => {
+    const playUnavailableTone = async () => {
+      try {
+        if (unavailableSoundRef.current) {
+          await unavailableSoundRef.current.unloadAsync();
+        }
+        const { sound } = await ExpoAudio.Sound.createAsync(unavailableTone, { shouldPlay: true });
+        unavailableSoundRef.current = sound;
+        await sound.playAsync();
+      } catch (error) {
+        console.error('Failed to play unavailable tone:', error);
+      }
+    };
+
+    if (callStatus === 'failed') {
+      playUnavailableTone();
+    }
+
+    return () => {
+      if (unavailableSoundRef.current) {
+        unavailableSoundRef.current.unloadAsync().catch(() => null);
+        unavailableSoundRef.current = null;
+      }
+    };
+  }, [callStatus, unavailableTone]);
 
   const formatTime = (totalSeconds: number): string => {
     const mins = Math.floor(totalSeconds / 60);
@@ -210,6 +241,35 @@ export default function InCall({ onEndCall, number, contactName: propContactName
     return nameOrNum.slice(0, 2).toUpperCase();
   };
 
+  if (Platform.OS !== 'web') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{getInitials(contactName || number)}</Text>
+        </View>
+        <Text style={styles.nameText}>{contactName || number}</Text>
+        {contactName && number !== contactName ? <Text style={styles.subText}>{number}</Text> : null}
+
+        <Text style={[styles.statusText, callStatus === 'failed' ? styles.statusFailed : null]}>
+          {callStatus === 'calling' && 'Calling...'}
+          {callStatus === 'connected' && 'Recording call...'}
+          {callStatus === 'failed' && 'Call Failed'}
+        </Text>
+        {callStatus === 'connected' ? <Text style={styles.timerText}>{formatTime(seconds)}</Text> : null}
+
+        <View style={styles.controls}>
+          <Pressable style={styles.controlButton} onPress={() => setIsMuted(!isMuted)}>
+            {isMuted ? <Feather name="mic-off" size={22} color="#111827" /> : <Feather name="mic" size={22} color="#fff" />}
+          </Pressable>
+        </View>
+
+        <Pressable style={styles.endButton} onPress={handleEndCall}>
+          <Feather name="phone-off" size={28} color="#fff" />
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <div className={`flex flex-col min-h-screen ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-gray-900'}`}>
       {/* Status Bar Area */}
@@ -298,3 +358,70 @@ export default function InCall({ onEndCall, number, contactName: propContactName
     </div>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  avatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(147, 51, 234, 0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: '300',
+  },
+  nameText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '300',
+  },
+  subText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  statusText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    marginTop: 20,
+  },
+  statusFailed: {
+    color: '#f87171',
+  },
+  timerText: {
+    color: '#fff',
+    fontSize: 22,
+    marginTop: 6,
+  },
+  controls: {
+    marginTop: 30,
+    marginBottom: 24,
+  },
+  controlButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  endButton: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

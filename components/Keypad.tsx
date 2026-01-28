@@ -1,7 +1,9 @@
 import { useTheme } from '@/contexts/ThemeContext';
-import { getUserProfile } from '@/utils/storage';
+import { getAllCalls, getUserProfile } from '@/utils/storage';
+import { Feather } from '@expo/vector-icons';
 import { ChevronLeft, Phone, User } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Image, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 interface KeypadProps {
   onCall: (number: string) => void;
@@ -68,11 +70,23 @@ export default function Keypad({ onCall, prefilledNumber }: KeypadProps) {
     setNumber('');
   };
 
-  const handleCall = () => {
+  const loadRecentCallNumber = async () => {
+    const calls = await getAllCalls();
+    if (calls.length === 0) return;
+    const sorted = calls.sort((a, b) => b.timestamp - a.timestamp);
+    const lastCall = sorted[0];
+    if (lastCall?.number) {
+      setNumber(lastCall.number);
+    }
+  };
+
+  const handleCall = async () => {
     if (number.length > 0) {
       onCall(number);
       setNumber('');
+      return;
     }
+    await loadRecentCallNumber();
   };
 
   const keypadLayout = [
@@ -81,6 +95,92 @@ export default function Keypad({ onCall, prefilledNumber }: KeypadProps) {
     [{ digit: '7', letters: 'PQRS' }, { digit: '8', letters: 'TUV' }, { digit: '9', letters: 'WXYZ' }],
     [{ digit: '*', letters: '' }, { digit: '0', letters: '+' }, { digit: '#', letters: '' }],
   ];
+
+  const formattedNumber = useMemo(() => number, [number]);
+
+  if (Platform.OS !== 'web') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Call</Text>
+          <Pressable style={styles.profileButton} onPress={() => setShowProfileModal(true)}>
+            <Feather name="user" size={18} color="#9ca3af" />
+          </Pressable>
+        </View>
+
+        <View style={styles.display}>
+          <Text style={[styles.matchText, !matchedContactName ? styles.hiddenText : null]}>
+            {matchedContactName || ' '}
+          </Text>
+          <Text style={styles.numberText}>{formattedNumber || ' '}</Text>
+          <Text style={[styles.helperText, formattedNumber ? styles.hiddenText : null]}>
+            {formattedNumber ? ' ' : 'Enter phone number'}
+          </Text>
+        </View>
+
+        <View style={styles.keypad}>
+          {keypadLayout.map((row, rowIdx) => (
+            <View key={rowIdx} style={styles.row}>
+              {row.map((item) => (
+                <Pressable
+                  key={item.digit}
+                  onPress={() => handleNumberPress(item.digit)}
+                  style={styles.keyButton}
+                >
+                  <Text style={styles.keyDigit}>{item.digit}</Text>
+                  {item.letters ? <Text style={styles.keyLetters}>{item.letters}</Text> : null}
+                </Pressable>
+              ))}
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.actions}>
+          <Pressable
+            onPress={handleDelete}
+            onLongPress={handleLongDelete}
+            disabled={number.length === 0}
+            style={[styles.actionButton, number.length === 0 ? styles.actionDisabled : null]}
+          >
+            <Feather name="delete" size={22} color="#fff" />
+          </Pressable>
+
+          <Pressable
+            onPress={handleCall}
+            style={styles.callButton}
+          >
+            <Feather name="phone-call" size={26} color="#fff" />
+          </Pressable>
+
+          <View style={styles.actionSpacer} />
+        </View>
+
+        <Modal visible={showProfileModal} transparent animationType="fade" onRequestClose={() => setShowProfileModal(false)}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setShowProfileModal(false)}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Profile</Text>
+              {userProfile ? (
+                <>
+                  {userProfile.profilePicture ? (
+                    <Image source={{ uri: userProfile.profilePicture }} style={styles.profileImage} />
+                  ) : (
+                    <View style={styles.profilePlaceholder}>
+                      <Feather name="user" size={36} color="#fff" />
+                    </View>
+                  )}
+                  <Text style={styles.profileName}>{userProfile.name}</Text>
+                  <Text style={styles.profilePhone}>{userProfile.phoneNumber}</Text>
+                  {userProfile.bio ? <Text style={styles.profileBio}>{userProfile.bio}</Text> : null}
+                </>
+              ) : (
+                <Text style={styles.profileBio}>No profile loaded.</Text>
+              )}
+            </View>
+          </Pressable>
+        </Modal>
+      </View>
+    );
+  }
 
   return (
     <div className={`flex flex-col min-h-screen ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-gray-900'}`}>
@@ -182,18 +282,11 @@ export default function Keypad({ onCall, prefilledNumber }: KeypadProps) {
             {/* Call Button */}
             <button
               onClick={handleCall}
-              disabled={number.length === 0}
-              className="w-[88px] h-[88px] rounded-full hover:scale-105 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center relative overflow-hidden group"
+              className="w-[88px] h-[88px] rounded-full hover:scale-105 active:scale-95 transition-all duration-200 flex items-center justify-center relative overflow-hidden group"
               style={{
-                background: number.length > 0 
-                  ? 'linear-gradient(135deg, #22C55E 0%, #16A34A 100%)' 
-                  : (theme === 'dark' ? 'rgba(75, 85, 99, 0.4)' : 'rgba(156, 163, 175, 0.3)'),
-                boxShadow: number.length > 0 
-                  ? '0 8px 32px rgba(34, 197, 94, 0.5), 0 0 0 0 rgba(34, 197, 94, 0.3)' 
-                  : 'none',
-                border: number.length > 0 
-                  ? '1px solid rgba(255, 255, 255, 0.2)' 
-                  : (theme === 'dark' ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(0, 0, 0, 0.1)'),
+                background: 'linear-gradient(135deg, #22C55E 0%, #16A34A 100%)',
+                boxShadow: '0 8px 32px rgba(34, 197, 94, 0.5), 0 0 0 0 rgba(34, 197, 94, 0.3)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
               }}
             >
               <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded-full"></div>
@@ -271,3 +364,164 @@ export default function Keypad({ onCall, prefilledNumber }: KeypadProps) {
     </div>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+    paddingTop: 34,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  profileButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(31, 41, 55, 0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  display: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    minHeight: 140,
+    justifyContent: 'center',
+  },
+  matchText: {
+    color: '#9ca3af',
+    fontSize: 13,
+    marginBottom: 6,
+    minHeight: 16,
+  },
+  numberText: {
+    color: '#fff',
+    fontSize: 42,
+    fontWeight: '300',
+    paddingTop: 20,
+    paddingBottom: 20,
+    minHeight: 52,
+  },
+  helperText: {
+    color: '#6b7280',
+    fontSize: 13,
+    marginTop: 6,
+    minHeight: 16,
+  },
+  hiddenText: {
+    opacity: 0,
+  },
+  keypad: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  keyButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  keyDigit: {
+    color: '#fff',
+    fontSize: 26,
+    fontWeight: '300',
+  },
+  keyLetters: {
+    color: '#9ca3af',
+    fontSize: 10,
+    letterSpacing: 2,
+    marginTop: 2,
+  },
+  actions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  actionButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  callButton: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: '#16a34a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionDisabled: {
+    opacity: 0.4,
+  },
+  actionSpacer: {
+    width: 56,
+    height: 56,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: '#111827',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 16,
+  },
+  profileImage: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    marginBottom: 12,
+  },
+  profilePlaceholder: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(147, 51, 234, 0.4)',
+    marginBottom: 12,
+  },
+  profileName: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  profilePhone: {
+    color: '#9ca3af',
+    fontSize: 13,
+    marginTop: 4,
+  },
+  profileBio: {
+    color: '#cbd5f5',
+    fontSize: 12,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+});

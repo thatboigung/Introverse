@@ -1,41 +1,66 @@
 {
   "expo": {
-    "name": "my-app",
+    "name": "MirrorDial",
     "slug": "my-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "icon": "./assets/logo.png",
+    "scheme": "mirrordial",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.taps2024.mirrordial"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#09090b",
+        "foregroundImage": "./assets/logo.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.BIND_TELECOM_CONNECTION_SERVICE",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.CALL_PHONE",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.taps2024.mirrordial"
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/logo.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/logo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#09090b",
           "dark": {
             "backgroundColor": "#000000"
+          }
+        }
+      ],
+      [
+        "@config-plugins/react-native-callkeep",
+        {
+          "ios": {
+            "appName": "MirrorDial"
+          },
+          "android": {
+            "alertTitle": "Phone account permission",
+            "alertDescription": "Allow MirrorDial to manage your self-reflection calls.",
+            "cancelButton": "Cancel",
+            "okButton": "Allow",
+            "foregroundService": {
+              "channelId": "mirrordial-calls",
+              "channelName": "MirrorDial Calls"
+            }
           }
         }
       ]
@@ -43,6 +68,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0a96ce3e-b8cb-495c-b814-1d5e4d2d7f0c"
+      }
+    },
+    "owner": "taps2024"
   }
 }

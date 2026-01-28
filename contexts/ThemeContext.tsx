@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Appearance, Platform } from 'react-native';
 
 type Theme = 'light' | 'dark';
 
@@ -11,26 +12,30 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    // Initialize from localStorage if available
-    if (typeof window !== 'undefined') {
-      const savedTheme = localStorage.getItem('theme') as Theme;
+    if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+      const storage = globalThis.localStorage;
+      const savedTheme = storage.getItem('theme') as Theme;
       if (savedTheme) {
         return savedTheme;
       }
-      // If no saved preference, use system theme
-      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      if ('matchMedia' in globalThis && globalThis.matchMedia('(prefers-color-scheme: dark)').matches) {
         return 'dark';
       }
       return 'light';
     }
-    return 'dark';
+    const scheme = Appearance.getColorScheme();
+    return scheme === 'dark' ? 'dark' : 'light';
   });
 
   useEffect(() => {
-    // Apply theme to document
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
     document.documentElement.classList.remove('light', 'dark');
     document.documentElement.classList.add(theme);
-    localStorage.setItem('theme', theme);
+    if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+      globalThis.localStorage.setItem('theme', theme);
+    }
   }, [theme]);
 
   const toggleTheme = () => {

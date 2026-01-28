@@ -1,10 +1,12 @@
 import { useTheme } from '@/contexts/ThemeContext';
 import { clearAllData, getInternalParts, saveInternalParts } from '@/utils/storage';
-import { Moon, Plus, Settings as SettingsIcon, Sun, Trash2, X } from 'lucide-react';
+import { Plus, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
 import React, { useRef, useState } from 'react';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 
 export default function Settings() {
-  const { theme, toggleTheme } = useTheme();
+  const { theme } = useTheme();
   const [internalParts, setInternalParts] = useState<string[]>(getInternalParts());
   const [newPart, setNewPart] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
@@ -28,8 +30,8 @@ export default function Settings() {
   const handleClearAll = async () => {
     if (showConfirm) {
       await clearAllData();
-      if (typeof window !== 'undefined') {
-        localStorage.clear();
+      if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+        globalThis.localStorage.clear();
       }
       alert('All data has been cleared.');
       setShowConfirm(false);
@@ -37,6 +39,72 @@ export default function Settings() {
       setShowConfirm(true);
     }
   };
+
+  if (Platform.OS !== 'web') {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.title}>Settings</Text>
+        <Text style={styles.subtitle}>Manage your app preferences</Text>
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionIcon}>
+              <Feather name="tag" size={18} color="#3b82f6" />
+            </View>
+            <View>
+              <Text style={styles.sectionTitle}>Internal Parts</Text>
+              <Text style={styles.sectionCaption}>Label your calls with parts</Text>
+            </View>
+          </View>
+          <View style={styles.chipRow}>
+            {internalParts.map((part) => (
+              <View key={part} style={styles.chip}>
+                <Text style={styles.chipText}>{part}</Text>
+                <Pressable onPress={() => handleRemovePart(part)} style={styles.chipRemove}>
+                  <Feather name="x" size={12} color="#f87171" />
+                </Pressable>
+              </View>
+            ))}
+          </View>
+          <View style={styles.inputRow}>
+            <TextInput
+              value={newPart}
+              onChangeText={setNewPart}
+              placeholder="Add new part (e.g., Wise Self)"
+              placeholderTextColor="#6b7280"
+              style={styles.input}
+            />
+            <Pressable style={styles.addButton} onPress={handleAddPart}>
+              <Feather name="plus" size={18} color="#fff" />
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionIconDanger}>
+              <Feather name="trash-2" size={18} color="#f87171" />
+            </View>
+            <View>
+              <Text style={styles.sectionTitle}>Privacy</Text>
+              <Text style={styles.sectionCaption}>Clear all your data.</Text>
+            </View>
+          </View>
+          <Pressable
+            style={styles.dangerButton}
+            onPress={() =>
+              Alert.alert('Clear all data?', 'This will delete recordings and chats.', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Clear', style: 'destructive', onPress: handleClearAll },
+              ])
+            }
+          >
+            <Text style={styles.dangerButtonText}>Clear All Data</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    );
+  }
 
   return (
     <div className={`flex flex-col min-h-screen ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-gray-900'}`}>
@@ -56,37 +124,6 @@ export default function Settings() {
       <div className="flex-1 px-4 pt-6 pb-32 overflow-y-auto" ref={scrollContainerRef}>
         <div className="max-w-2xl mx-auto">
           <p className="text-gray-500 text-sm mb-8 text-center">Manage your app preferences</p>
-
-          {/* Theme Toggle Section */}
-          <div
-            className={`${theme === 'dark' ? 'bg-gray-900/40 border-gray-800/50' : 'bg-gray-50 border-gray-200'} backdrop-blur-xl border rounded-3xl p-6 mb-6`}
-            style={{
-              background: theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(249, 250, 251, 1)',
-              backdropFilter: 'blur(20px)',
-              border: theme === 'dark' ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgb(229, 231, 235)',
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full ${theme === 'dark' ? 'bg-blue-500/20' : 'bg-blue-100'} flex items-center justify-center`}>
-                  {theme === 'dark' ? <Moon size={20} className="text-blue-400" /> : <Sun size={20} className="text-yellow-500" />}
-                </div>
-                <div>
-                  <h2 className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Theme</h2>
-                  <p className="text-gray-500 text-sm">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</p>
-                </div>
-              </div>
-              <button
-                onClick={toggleTheme}
-                className={`relative w-16 h-8 rounded-full transition-colors ${theme === 'dark' ? 'bg-blue-500' : 'bg-gray-300'}`}
-              >
-                <div
-                  className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-transform ${theme === 'dark' ? 'translate-x-9' : 'translate-x-1'}`}
-                  style={{ boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)' }}
-                />
-              </button>
-            </div>
-          </div>
 
           {/* Internal Parts Section */}
           <div
@@ -210,3 +247,141 @@ export default function Settings() {
     </div>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
+    backgroundColor: '#000',
+    padding: 16,
+  },
+  title: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  subtitle: {
+    color: '#9ca3af',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  section: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  sectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+  },
+  sectionIconDanger: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(248, 113, 113, 0.2)',
+  },
+  sectionText: {
+    flex: 1,
+  },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  sectionCaption: {
+    color: '#9ca3af',
+    fontSize: 12,
+  },
+  toggle: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#374151',
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    transform: [{ translateX: 0 }],
+  },
+  toggleOn: {
+    transform: [{ translateX: 20 }],
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  chipText: {
+    color: '#fff',
+    fontSize: 12,
+  },
+  chipRemove: {
+    padding: 2,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  input: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  addButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#2563eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dangerButton: {
+    backgroundColor: 'rgba(248, 113, 113, 0.2)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  dangerButtonText: {
+    color: '#f87171',
+    fontWeight: '600',
+  },
+});

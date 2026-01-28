@@ -1,11 +1,15 @@
 import { deleteRecording, getAllRecordings, getInternalParts, Recording, updateRecordingInternalPart } from '@/utils/storage';
 import { Calendar, Clock, Pause, Play, Tag, Trash2 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 
 export default function RecordingVault() {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [nativeSound, setNativeSound] = useState<Audio.Sound | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedPart, setSelectedPart] = useState<string>('');
   const internalParts = getInternalParts();
@@ -46,6 +50,40 @@ export default function RecordingVault() {
   };
 
   const handlePlay = (recording: Recording) => {
+    if (Platform.OS !== 'web') {
+      const playNative = async () => {
+        if (nativeSound) {
+          await nativeSound.unloadAsync();
+          setNativeSound(null);
+        }
+
+        if (playingId === recording.id) {
+          setPlayingId(null);
+          return;
+        }
+
+        try {
+          const { sound } = await Audio.Sound.createAsync(
+            { uri: recording.audioData },
+            { shouldPlay: true }
+          );
+          setNativeSound(sound);
+          setPlayingId(recording.id);
+          sound.setOnPlaybackStatusUpdate((status) => {
+            if ('didJustFinish' in status && status.didJustFinish) {
+              setPlayingId(null);
+              sound.unloadAsync();
+              setNativeSound(null);
+            }
+          });
+        } catch (error) {
+          console.error('Failed to play recording', error);
+          Alert.alert('Playback failed', 'Unable to play this recording.');
+        }
+      };
+      void playNative();
+      return;
+    }
     if (audioElement) {
       audioElement.pause();
       audioElement.src = '';
@@ -69,6 +107,20 @@ export default function RecordingVault() {
   };
 
   const handleDelete = async (id: string) => {
+    if (Platform.OS !== 'web') {
+      Alert.alert('Delete recording?', 'This action cannot be undone.', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteRecording(id);
+            loadRecordings();
+          },
+        },
+      ]);
+      return;
+    }
     if (confirm('Delete this recording?')) {
       await deleteRecording(id);
       if (audioElement && playingId === id) {
@@ -88,6 +140,41 @@ export default function RecordingVault() {
       loadRecordings();
     }
   };
+
+  if (Platform.OS !== 'web') {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Recordings</Text>
+        <Text style={styles.subtitle}>Your self-reflection calls</Text>
+        <ScrollView contentContainerStyle={styles.list}>
+          {recordings.length === 0 ? (
+            <View style={styles.empty}>
+              <Feather name="calendar" size={28} color="#6b7280" />
+              <Text style={styles.emptyText}>No recordings yet</Text>
+            </View>
+          ) : (
+            recordings.map((recording) => (
+              <View key={recording.id} style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardTitle}>{recording.internalPart || 'Self Reflection'}</Text>
+                  <Pressable onPress={() => handleDelete(recording.id)}>
+                    <Feather name="trash-2" size={16} color="#f87171" />
+                  </Pressable>
+                </View>
+                <Text style={styles.cardMeta}>
+                  {formatDate(recording.timestamp)} • {formatTime(recording.timestamp)} • {formatDuration(recording.duration)}
+                </Text>
+                <Pressable style={styles.playButton} onPress={() => handlePlay(recording)}>
+                  <Feather name="play" size={16} color="#fff" />
+                  <Text style={styles.playText}>Play (web only)</Text>
+                </Pressable>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-black text-white">
@@ -222,3 +309,70 @@ export default function RecordingVault() {
     </div>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+    padding: 16,
+  },
+  title: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  subtitle: {
+    color: '#9ca3af',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  list: {
+    paddingBottom: 24,
+    gap: 12,
+  },
+  empty: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    color: '#9ca3af',
+    marginTop: 8,
+  },
+  card: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 16,
+    padding: 12,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  cardTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  cardMeta: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginTop: 6,
+  },
+  playButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  playText: {
+    color: '#fff',
+    fontSize: 12,
+  },
+});

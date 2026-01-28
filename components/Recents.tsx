@@ -1,9 +1,12 @@
 import { useTheme } from '@/contexts/ThemeContext';
 import { Call, deleteCall, deleteRecording, getAllCalls, getAllRecordings, getInternalParts, getUserProfile, Recording, updateCallInternalPart } from '@/utils/storage';
+import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { Audio as ExpoAudio } from 'expo-av';
 import { useRouter } from 'expo-router';
 import { AlertTriangle, Clock, Pause, Phone, PhoneIncoming, PhoneOutgoing, Play, Search, Tag, Trash2, X } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Animated, Easing, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 export default function Recents() {
   const { theme } = useTheme();
@@ -12,13 +15,21 @@ export default function Recents() {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const nativeSoundRef = useRef<ExpoAudio.Sound | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackPositionMs, setPlaybackPositionMs] = useState(0);
+  const [playbackDurationMs, setPlaybackDurationMs] = useState(0);
+  const [playbackBarWidth, setPlaybackBarWidth] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedPart, setSelectedPart] = useState<string>('');  
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [userPhone, setUserPhone] = useState<string>('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [callToDelete, setCallToDelete] = useState<string | null>(null);
+  const [showDeletePopup, setShowDeletePopup] = useState(false);
+  const deleteAnim = useRef(new Animated.Value(0)).current;
   const [showClearAllModal, setShowClearAllModal] = useState(false);
+  const [showClearMenu, setShowClearMenu] = useState(false);
   const internalParts = getInternalParts();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -27,6 +38,19 @@ export default function Recents() {
     loadRecordings();
     loadUserPhone();
   }, []);
+
+  useEffect(() => {
+    if (!showDeletePopup) {
+      deleteAnim.setValue(0);
+      return;
+    }
+    Animated.timing(deleteAnim, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [showDeletePopup, deleteAnim]);
 
   // Reload calls whenever the screen becomes focused
   useFocusEffect(
@@ -90,35 +114,131 @@ export default function Recents() {
     return `${mins}m ${secs}s`;
   };
 
+  const formatPlaybackTime = (ms: number): string => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const handlePlayRecording = (call: Call) => {
     if (!call.hasRecording || !call.recordingId) return;
 
     const recording = recordings.find(r => r.id === call.recordingId);
     if (!recording) return;
 
+    if (Platform.OS !== 'web') {
+      const playNative = async () => {
+        if (playingId === call.recordingId && nativeSoundRef.current) {
+          const status = await nativeSoundRef.current.getStatusAsync();
+          if ('isLoaded' in status && status.isLoaded) {
+            if (status.isPlaying) {
+              await nativeSoundRef.current.pauseAsync();
+              setIsPlaying(false);
+            } else {
+              await nativeSoundRef.current.playAsync();
+              setIsPlaying(true);
+            }
+            return;
+          }
+        }
+
+        if (nativeSoundRef.current) {
+          await nativeSoundRef.current.unloadAsync();
+          nativeSoundRef.current = null;
+        }
+
+        try {
+          const { sound } = await ExpoAudio.Sound.createAsync(
+            { uri: recording.audioData },
+            { shouldPlay: true }
+          );
+          nativeSoundRef.current = sound;
+          setPlayingId(call.recordingId ?? null);
+          setIsPlaying(true);
+          sound.setOnPlaybackStatusUpdate((status) => {
+            if ('isLoaded' in status && status.isLoaded) {
+              setPlaybackPositionMs(status.positionMillis ?? 0);
+              setPlaybackDurationMs(status.durationMillis ?? 0);
+              setIsPlaying(status.isPlaying ?? false);
+            }
+            if ('didJustFinish' in status && status.didJustFinish) {
+              setPlayingId(null);
+              setIsPlaying(false);
+              setPlaybackPositionMs(0);
+              setPlaybackDurationMs(0);
+              sound.unloadAsync();
+              nativeSoundRef.current = null;
+            }
+          });
+        } catch (error) {
+          console.error('Failed to play recording', error);
+          Alert.alert('Playback failed', 'Unable to play this recording.');
+        }
+      };
+      void playNative();
+      return;
+    }
+
     if (audioElement) {
+      if (playingId === call.recordingId) {
+        if (audioElement.paused) {
+          audioElement.play();
+          setIsPlaying(true);
+        } else {
+          audioElement.pause();
+          setIsPlaying(false);
+        }
+        return;
+      }
       audioElement.pause();
       audioElement.src = '';
     }
 
-    if (playingId === call.recordingId) {
-      setPlayingId(null);
-      setAudioElement(null);
-      return;
-    }
-
-    const audio = new Audio(recording.audioData);
+    const audio = new globalThis.Audio(recording.audioData);
+    audio.onloadedmetadata = () => {
+      setPlaybackDurationMs(audio.duration * 1000);
+    };
+    audio.ontimeupdate = () => {
+      setPlaybackPositionMs(audio.currentTime * 1000);
+    };
     audio.play();
     setAudioElement(audio);
-    setPlayingId(call.recordingId);
+    setPlayingId(call.recordingId ?? null);
+    setIsPlaying(true);
 
     audio.onended = () => {
       setPlayingId(null);
+      setIsPlaying(false);
       setAudioElement(null);
+      setPlaybackPositionMs(0);
+      setPlaybackDurationMs(0);
     };
   };
 
+  const handleSeek = async (ratio: number) => {
+    if (playbackDurationMs <= 0) return;
+    const clampedRatio = Math.max(0, Math.min(1, ratio));
+    const targetMs = clampedRatio * playbackDurationMs;
+    setPlaybackPositionMs(targetMs);
+    if (Platform.OS !== 'web' && nativeSoundRef.current && playingId) {
+      try {
+        await nativeSoundRef.current.setPositionAsync(targetMs);
+      } catch {
+        // ignore seek failure
+      }
+    }
+    if (Platform.OS === 'web' && audioElement) {
+      audioElement.currentTime = targetMs / 1000;
+    }
+  };
+
   const handleDelete = (id: string) => {
+    if (Platform.OS !== 'web') {
+      setCallToDelete(id);
+      setShowDeletePopup(true);
+      return;
+    }
     setCallToDelete(id);
     setShowDeleteModal(true);
   };
@@ -145,15 +265,24 @@ export default function Recents() {
       loadCalls();
     }
     setShowDeleteModal(false);
+    setShowDeletePopup(false);
     setCallToDelete(null);
   };
 
   const cancelDelete = () => {
     setShowDeleteModal(false);
     setCallToDelete(null);
+    setShowDeletePopup(false);
   };
 
   const handleClearAll = () => {
+    if (Platform.OS !== 'web') {
+      Alert.alert('Clear all calls?', 'This will delete call history and recordings.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete All', style: 'destructive', onPress: confirmClearAll },
+      ]);
+      return;
+    }
     setShowClearAllModal(true);
   };
 
@@ -212,6 +341,153 @@ export default function Recents() {
     acc[dateKey].push(call);
     return acc;
   }, {} as Record<string, Call[]>);
+
+  if (Platform.OS !== 'web') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Recents</Text>
+          {showClearMenu ? (
+            <Pressable
+              style={[styles.clearButton, calls.length === 0 ? styles.menuButtonDisabled : null]}
+              onPress={() => {
+                if (calls.length === 0) return;
+                setShowClearMenu(false);
+                confirmClearAll();
+              }}
+              disabled={calls.length === 0}
+            >
+              <Text style={styles.clearButtonText}>Clear</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={[styles.menuButton, calls.length === 0 ? styles.menuButtonDisabled : null]}
+              onPress={() => {
+                if (calls.length === 0) return;
+                setShowClearMenu(true);
+              }}
+              disabled={calls.length === 0}
+            >
+              <Feather name="more-vertical" size={18} color={calls.length === 0 ? '#4b5563' : '#f87171'} />
+            </Pressable>
+          )}
+        </View>
+
+        <View style={styles.searchRow}>
+          <Feather name="search" size={16} color="#6b7280" />
+          <TextInput placeholder="Search" placeholderTextColor="#6b7280" style={styles.searchInput} />
+        </View>
+
+        <ScrollView contentContainerStyle={styles.list}>
+          {calls.length === 0 ? (
+            <View style={styles.empty}>
+              <Feather name="phone" size={28} color="#6b7280" />
+              <Text style={styles.emptyText}>No recent calls</Text>
+            </View>
+          ) : (
+            calls.map((call) => (
+              <View key={call.id}>
+                <Pressable
+                  style={styles.card}
+                  onPress={() => setSelectedCall(selectedCall?.id === call.id ? null : call)}
+                >
+                  <Text style={styles.cardTitle}>{call.number}</Text>
+                  <Text style={styles.cardMeta}>
+                    {formatTime(call.timestamp)} • {formatDuration(call.duration)}
+                  </Text>
+                  {call.internalPart ? <Text style={styles.cardLabel}>{call.internalPart}</Text> : null}
+                </Pressable>
+                {selectedCall?.id === call.id ? (
+                  <View style={styles.actionPanel}>
+                    {call.hasRecording ? (
+                      <Pressable style={styles.actionButton} onPress={() => handlePlayRecording(call)}>
+                        <Feather name={playingId === call.recordingId && isPlaying ? 'pause' : 'play'} size={14} color="#fff" />
+                        <Text style={styles.actionText}>{playingId === call.recordingId && isPlaying ? 'Pause' : 'Play'}</Text>
+                      </Pressable>
+                    ) : null}
+                    <Pressable style={styles.actionButton} onPress={() => router.push('/')}>
+                      <Feather name="phone-call" size={14} color="#fff" />
+                      <Text style={styles.actionText}>Call</Text>
+                    </Pressable>
+                    <Pressable style={[styles.actionButton, styles.deleteButton]} onPress={() => handleDelete(call.id)}>
+                      <Feather name="trash-2" size={14} color="#fff" />
+                      <Text style={styles.actionText}>Delete</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+                {selectedCall?.id === call.id && playingId === call.recordingId ? (
+                  <View style={styles.playbackMeter}>
+                    <Pressable
+                      style={styles.playbackBar}
+                      onLayout={(event) => setPlaybackBarWidth(event.nativeEvent.layout.width)}
+                      onPress={(event) => {
+                        if (playbackBarWidth <= 0) return;
+                        const ratio = event.nativeEvent.locationX / playbackBarWidth;
+                        void handleSeek(ratio);
+                      }}
+                    >
+                      <View
+                        style={[
+                          styles.playbackProgress,
+                          {
+                            width:
+                              playbackDurationMs > 0
+                                ? `${Math.min(100, (playbackPositionMs / playbackDurationMs) * 100)}%`
+                                : '0%',
+                          },
+                        ]}
+                      />
+                    </Pressable>
+                    <View style={styles.playbackTimes}>
+                      <Text style={styles.playbackText}>{formatPlaybackTime(playbackPositionMs)}</Text>
+                      <Text style={styles.playbackText}>{formatPlaybackTime(playbackDurationMs)}</Text>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+            ))
+          )}
+        </ScrollView>
+
+        <Modal transparent visible={showDeletePopup} animationType="none" onRequestClose={cancelDelete}>
+          <Pressable style={styles.popupBackdrop} onPress={cancelDelete}>
+            <Animated.View
+              style={[
+                styles.popupCard,
+                {
+                  opacity: deleteAnim,
+                  transform: [
+                    {
+                      scale: deleteAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.95, 1],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <Text style={styles.popupTitle}>Delete Call</Text>
+              <Text style={styles.popupMessage}>Are you sure you want to delete this call?</Text>
+              <Text style={styles.popupSub}>This action cannot be undone.</Text>
+              <View style={styles.popupActions}>
+                <Pressable style={[styles.popupButton, styles.popupSecondary]} onPress={cancelDelete}>
+                  <Text style={styles.popupButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.popupButton, styles.popupDanger]}
+                  onPress={confirmDelete}
+                >
+                  <Text style={styles.popupButtonText}>Delete</Text>
+                </Pressable>
+              </View>
+            </Animated.View>
+          </Pressable>
+        </Modal>
+
+      </View>
+    );
+  }
 
   return (
     <div className={`flex flex-col min-h-screen ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-gray-900'}`}>
@@ -324,7 +600,7 @@ export default function Recents() {
                                       }}
                                       className={`w-8 h-8 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${theme === 'dark' ? 'bg-purple-500/20 hover:bg-purple-500/30' : 'bg-purple-100 hover:bg-purple-200'}`}
                                     >
-                                      {playingId === call.recordingId ? (
+                                      {playingId === call.recordingId && isPlaying ? (
                                         <Pause size={16} className="text-purple-400" />
                                       ) : (
                                         <Play size={16} className="text-purple-400 ml-0.5" fill="currentColor" />
@@ -332,6 +608,26 @@ export default function Recents() {
                                     </button>
                                     <div className="flex-1 min-w-0">
                                       <div className={`text-xs font-medium ${theme === 'dark' ? 'text-purple-300' : 'text-purple-700'}`}>Call Recording</div>
+                                      {playingId === call.recordingId ? (
+                                        <div
+                                          className={`mt-1 h-1 rounded-full cursor-pointer ${theme === 'dark' ? 'bg-purple-500/20' : 'bg-purple-200'}`}
+                                          onClick={(event) => {
+                                            const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
+                                            const ratio = rect.width ? (event.clientX - rect.left) / rect.width : 0;
+                                            void handleSeek(ratio);
+                                          }}
+                                        >
+                                          <div
+                                            className="h-1 rounded-full bg-purple-500"
+                                            style={{
+                                              width:
+                                                playbackDurationMs > 0
+                                                  ? `${Math.min(100, (playbackPositionMs / playbackDurationMs) * 100)}%`
+                                                  : '0%',
+                                            }}
+                                          />
+                                        </div>
+                                      ) : null}
                                     </div>
                                     {playingId === call.recordingId && (
                                       <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -394,7 +690,9 @@ export default function Recents() {
                                 {/* Call Button */}
                                 <button
                                   onClick={() => {
-                                    localStorage.setItem('prefilledNumber', call.number);
+                                    if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+                                      globalThis.localStorage.setItem('prefilledNumber', call.number);
+                                    }
                                     router.push('/');
                                   }}
                                   className="flex flex-col items-center gap-2 p-4 rounded-xl hover:bg-gray-800/50 active:bg-gray-700/50 transition-all group"
@@ -446,7 +744,7 @@ export default function Recents() {
                                       onClick={() => handlePlayRecording(call)}
                                       className="w-10 h-10 rounded-full bg-purple-500/20 hover:bg-purple-500/30 flex items-center justify-center transition-all"
                                     >
-                                      {playingId === call.recordingId ? (
+                                      {playingId === call.recordingId && isPlaying ? (
                                         <Pause size={18} className="text-purple-400" />
                                       ) : (
                                         <Play size={18} className="text-purple-400" />
@@ -457,6 +755,26 @@ export default function Recents() {
                                       <div className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
                                         Duration: {formatDuration(call.duration)}
                                       </div>
+                                      {playingId === call.recordingId ? (
+                                        <div
+                                          className="mt-2 h-1 rounded-full bg-purple-500/20 cursor-pointer"
+                                          onClick={(event) => {
+                                            const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
+                                            const ratio = rect.width ? (event.clientX - rect.left) / rect.width : 0;
+                                            void handleSeek(ratio);
+                                          }}
+                                        >
+                                          <div
+                                            className="h-1 rounded-full bg-purple-500"
+                                            style={{
+                                              width:
+                                                playbackDurationMs > 0
+                                                  ? `${Math.min(100, (playbackPositionMs / playbackDurationMs) * 100)}%`
+                                                  : '0%',
+                                            }}
+                                          />
+                                        </div>
+                                      ) : null}
                                     </div>
                                     {playingId === call.recordingId && (
                                       <div className="flex items-center gap-1">
@@ -581,3 +899,194 @@ export default function Recents() {
     </div>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+    paddingTop: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  menuButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  clearButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+  },
+  clearButtonText: {
+    color: '#f87171',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  menuButtonDisabled: {
+    opacity: 0.4,
+  },
+  clearText: {
+    color: '#f87171',
+    fontSize: 12,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  searchInput: {
+    flex: 1,
+    color: '#fff',
+    paddingVertical: 0,
+  },
+  list: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+    gap: 12,
+  },
+  empty: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    color: '#9ca3af',
+    marginTop: 8,
+  },
+  card: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 16,
+    padding: 12,
+  },
+  actionPanel: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  playbackMeter: {
+    marginBottom: 12,
+  },
+  playbackBar: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    overflow: 'hidden',
+  },
+  playbackProgress: {
+    height: '100%',
+    backgroundColor: '#3b82f6',
+  },
+  playbackTimes: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  playbackText: {
+    color: '#9ca3af',
+    fontSize: 11,
+  },
+  cardTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cardMeta: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  cardLabel: {
+    color: '#3b82f6',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  deleteButton: {
+    backgroundColor: '#ef4444',
+  },
+  actionText: {
+    color: '#fff',
+    fontSize: 12,
+  },
+  popupBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  popupCard: {
+    backgroundColor: '#111827',
+    borderRadius: 20,
+    padding: 20,
+  },
+  popupTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  popupMessage: {
+    color: '#e5e7eb',
+    marginTop: 10,
+    fontSize: 14,
+  },
+  popupSub: {
+    color: '#9ca3af',
+    marginTop: 6,
+    fontSize: 12,
+  },
+  popupActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  popupButton: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  popupSecondary: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  popupDanger: {
+    backgroundColor: '#ef4444',
+  },
+  popupButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+});

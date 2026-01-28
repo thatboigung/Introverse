@@ -1,6 +1,8 @@
 import { ChatMessage, getAllChatMessages, saveChatMessage } from '@/utils/storage';
 import { MessageSquare, Send } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 
 export default function InternalChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -53,6 +55,44 @@ export default function InternalChat() {
       handleSend();
     }
   };
+
+  if (Platform.OS !== 'web') {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Internal Chat</Text>
+        <Text style={styles.subtitle}>Have a conversation with yourself</Text>
+
+        <ScrollView contentContainerStyle={styles.messages}>
+          {messages.length === 0 ? (
+            <View style={styles.empty}>
+              <Feather name="message-circle" size={28} color="#6b7280" />
+              <Text style={styles.emptyText}>No messages yet</Text>
+            </View>
+          ) : (
+            messages.map((message) => (
+              <View key={message.id} style={[styles.bubble, message.isSelf ? styles.bubbleSelf : styles.bubbleOther]}>
+                <Text style={styles.bubbleText}>{message.text}</Text>
+                <Text style={styles.bubbleTime}>{formatTime(message.timestamp)}</Text>
+              </View>
+            ))
+          )}
+        </ScrollView>
+
+        <View style={styles.inputRow}>
+          <TextInput
+            value={inputText}
+            onChangeText={setInputText}
+            placeholder={waitingForResponse ? 'Waiting for your inner response...' : 'Message...'}
+            placeholderTextColor="#6b7280"
+            style={styles.input}
+          />
+          <Pressable style={styles.sendButton} onPress={handleSend} disabled={!inputText.trim()}>
+            <Feather name="send" size={18} color="#fff" />
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-black text-white">
@@ -158,3 +198,80 @@ export default function InternalChat() {
     </div>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+    padding: 16,
+  },
+  title: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  subtitle: {
+    color: '#9ca3af',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  messages: {
+    flexGrow: 1,
+    gap: 8,
+    paddingVertical: 12,
+  },
+  empty: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    color: '#9ca3af',
+    marginTop: 8,
+  },
+  bubble: {
+    maxWidth: '75%',
+    borderRadius: 16,
+    padding: 10,
+  },
+  bubbleSelf: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#3b82f6',
+  },
+  bubbleOther: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  bubbleText: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  bubbleTime: {
+    color: '#dbeafe',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingTop: 8,
+  },
+  input: {
+    flex: 1,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+  },
+  sendButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#3b82f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

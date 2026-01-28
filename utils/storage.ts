@@ -1,4 +1,14 @@
 // Utility functions for IndexedDB and LocalStorage
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
+import { Platform } from 'react-native';
+
+const USER_PROFILE_KEY = 'userProfile';
+const USER_PROFILE_PICTURE_KEY = 'userProfilePicture';
+const RECORDINGS_KEY = 'recordings';
+const CHAT_MESSAGES_KEY = 'chatMessages';
+const CALLS_KEY = 'calls';
+const CONTACTS_KEY = 'contacts';
 
 export interface Recording {
   id: string;
@@ -18,6 +28,7 @@ export interface ChatMessage {
   isAudio?: boolean;
   replyTo?: string; // ID of message being replied to
   isRead?: boolean; // Whether message has been read
+  reminderAt?: number; // Scheduled reminder time (ms)
 }
 
 export interface Call {
@@ -29,6 +40,14 @@ export interface Call {
   internalPart?: string;
   hasRecording: boolean;
   recordingId?: string;
+}
+
+export interface StoredContact {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  description: string;
+  profilePicture?: string;
 }
 
 // Initialize IndexedDB
@@ -58,8 +77,23 @@ function initDB(): Promise<IDBDatabase> {
   });
 }
 
+async function readAsyncList<T>(key: string): Promise<T[]> {
+  const data = await AsyncStorage.getItem(key);
+  return data ? (JSON.parse(data) as T[]) : [];
+}
+
+async function writeAsyncList<T>(key: string, items: T[]): Promise<void> {
+  await AsyncStorage.setItem(key, JSON.stringify(items));
+}
+
 // Save recording to IndexedDB
 export async function saveRecording(recording: Recording): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const recordings = await readAsyncList<Recording>(RECORDINGS_KEY);
+    recordings.push(recording);
+    await writeAsyncList(RECORDINGS_KEY, recordings);
+    return;
+  }
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['recordings'], 'readwrite');
@@ -74,6 +108,9 @@ export async function saveRecording(recording: Recording): Promise<void> {
 // Get all recordings from IndexedDB
 export async function getAllRecordings(): Promise<Recording[]> {
   try {
+    if (Platform.OS !== 'web') {
+      return await readAsyncList<Recording>(RECORDINGS_KEY);
+    }
     const db = await initDB();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(['recordings'], 'readonly');
@@ -92,6 +129,10 @@ export async function getAllRecordings(): Promise<Recording[]> {
 // Get a specific recording by ID
 export async function getRecordingById(id: string): Promise<Recording | null> {
   try {
+    if (Platform.OS !== 'web') {
+      const recordings = await readAsyncList<Recording>(RECORDINGS_KEY);
+      return recordings.find((rec) => rec.id === id) || null;
+    }
     const db = await initDB();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(['recordings'], 'readonly');
@@ -109,6 +150,20 @@ export async function getRecordingById(id: string): Promise<Recording | null> {
 
 // Delete a recording
 export async function deleteRecording(id: string): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const recordings = await readAsyncList<Recording>(RECORDINGS_KEY);
+    const toDelete = recordings.find((rec) => rec.id === id);
+    if (toDelete?.audioData && toDelete.audioData.startsWith('file://')) {
+      try {
+        await FileSystem.deleteAsync(toDelete.audioData, { idempotent: true });
+      } catch (error) {
+        console.warn('Failed to delete recording file', error);
+      }
+    }
+    const filtered = recordings.filter((rec) => rec.id !== id);
+    await writeAsyncList(RECORDINGS_KEY, filtered);
+    return;
+  }
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['recordings'], 'readwrite');
@@ -122,6 +177,12 @@ export async function deleteRecording(id: string): Promise<void> {
 
 // Save chat message
 export async function saveChatMessage(message: ChatMessage): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const messages = await readAsyncList<ChatMessage>(CHAT_MESSAGES_KEY);
+    messages.push(message);
+    await writeAsyncList(CHAT_MESSAGES_KEY, messages);
+    return;
+  }
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['chatMessages'], 'readwrite');
@@ -136,6 +197,10 @@ export async function saveChatMessage(message: ChatMessage): Promise<void> {
 // Get all chat messages
 export async function getAllChatMessages(): Promise<ChatMessage[]> {
   try {
+    if (Platform.OS !== 'web') {
+      const messages = await readAsyncList<ChatMessage>(CHAT_MESSAGES_KEY);
+      return messages.sort((a, b) => a.timestamp - b.timestamp);
+    }
     const db = await initDB();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(['chatMessages'], 'readonly');
@@ -157,6 +222,12 @@ export async function getAllChatMessages(): Promise<ChatMessage[]> {
 // Get messages for a specific conversation
 export async function getChatMessagesByConversation(conversationId: string): Promise<ChatMessage[]> {
   try {
+    if (Platform.OS !== 'web') {
+      const messages = await readAsyncList<ChatMessage>(CHAT_MESSAGES_KEY);
+      return messages
+        .filter((msg) => msg.conversationId === conversationId)
+        .sort((a, b) => a.timestamp - b.timestamp);
+    }
     const db = await initDB();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(['chatMessages'], 'readonly');
@@ -199,6 +270,16 @@ export async function getConversationPreview(conversationId: string): Promise<{ 
 // Mark all messages in a conversation as read
 export async function markConversationAsRead(conversationId: string): Promise<void> {
   try {
+    if (Platform.OS !== 'web') {
+      const messages = await readAsyncList<ChatMessage>(CHAT_MESSAGES_KEY);
+      const updated = messages.map((message) =>
+        message.conversationId === conversationId && !message.isSelf
+          ? { ...message, isRead: true }
+          : message
+      );
+      await writeAsyncList(CHAT_MESSAGES_KEY, updated);
+      return;
+    }
     const db = await initDB();
     const messages = await getChatMessagesByConversation(conversationId);
     
@@ -224,6 +305,12 @@ export async function markConversationAsRead(conversationId: string): Promise<vo
 
 // Save call to IndexedDB
 export async function saveCall(call: Call): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const calls = await readAsyncList<Call>(CALLS_KEY);
+    calls.push(call);
+    await writeAsyncList(CALLS_KEY, calls);
+    return;
+  }
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['calls'], 'readwrite');
@@ -238,6 +325,9 @@ export async function saveCall(call: Call): Promise<void> {
 // Get all calls from IndexedDB
 export async function getAllCalls(): Promise<Call[]> {
   try {
+    if (Platform.OS !== 'web') {
+      return await readAsyncList<Call>(CALLS_KEY);
+    }
     const db = await initDB();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(['calls'], 'readonly');
@@ -255,6 +345,12 @@ export async function getAllCalls(): Promise<Call[]> {
 
 // Delete a call
 export async function deleteCall(id: string): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const calls = await readAsyncList<Call>(CALLS_KEY);
+    const filtered = calls.filter((call) => call.id !== id);
+    await writeAsyncList(CALLS_KEY, filtered);
+    return;
+  }
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['calls'], 'readwrite');
@@ -268,6 +364,12 @@ export async function deleteCall(id: string): Promise<void> {
 
 // Update call with internal part
 export async function updateCallInternalPart(id: string, internalPart: string): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const calls = await readAsyncList<Call>(CALLS_KEY);
+    const updated = calls.map((call) => (call.id === id ? { ...call, internalPart } : call));
+    await writeAsyncList(CALLS_KEY, updated);
+    return;
+  }
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['calls'], 'readwrite');
@@ -291,6 +393,16 @@ export async function updateCallInternalPart(id: string, internalPart: string): 
 
 // Clear all data
 export async function clearAllData(): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const recordings = await readAsyncList<Recording>(RECORDINGS_KEY);
+    await Promise.all(
+      recordings
+        .filter((rec) => rec.audioData?.startsWith('file://'))
+        .map((rec) => FileSystem.deleteAsync(rec.audioData, { idempotent: true }))
+    );
+    await AsyncStorage.multiRemove([RECORDINGS_KEY, CHAT_MESSAGES_KEY, CALLS_KEY]);
+    return;
+  }
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['recordings', 'chatMessages', 'calls'], 'readwrite');
@@ -317,10 +429,70 @@ export async function clearAllData(): Promise<void> {
   });
 }
 
+// Clear all user data including profile/session
+export async function clearAllUserData(): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const recordings = await readAsyncList<Recording>(RECORDINGS_KEY);
+    await Promise.all(
+      recordings
+        .filter((rec) => rec.audioData?.startsWith('file://'))
+        .map((rec) => FileSystem.deleteAsync(rec.audioData, { idempotent: true }))
+    );
+    await AsyncStorage.multiRemove([
+      RECORDINGS_KEY,
+      CHAT_MESSAGES_KEY,
+      CALLS_KEY,
+      CONTACTS_KEY,
+      USER_PROFILE_KEY,
+      USER_PROFILE_PICTURE_KEY,
+    ]);
+    return;
+  }
+  if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+    globalThis.localStorage.clear();
+  }
+  if (typeof globalThis !== 'undefined' && 'indexedDB' in globalThis) {
+    globalThis.indexedDB.deleteDatabase('InroCallDB');
+  }
+}
+
+export async function getContacts(): Promise<StoredContact[]> {
+  try {
+    if (Platform.OS !== 'web') {
+      return await readAsyncList<StoredContact>(CONTACTS_KEY);
+    }
+    if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+      const data = globalThis.localStorage.getItem(CONTACTS_KEY);
+      return data ? (JSON.parse(data) as StoredContact[]) : [];
+    }
+    return [];
+  } catch (error) {
+    console.error('Error getting contacts:', error);
+    return [];
+  }
+}
+
+export async function saveContact(contact: StoredContact): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const contacts = await readAsyncList<StoredContact>(CONTACTS_KEY);
+    contacts.push(contact);
+    await writeAsyncList(CONTACTS_KEY, contacts);
+    return;
+  }
+  if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+    const data = globalThis.localStorage.getItem(CONTACTS_KEY);
+    const contacts = data ? (JSON.parse(data) as StoredContact[]) : [];
+    contacts.push(contact);
+    globalThis.localStorage.setItem(CONTACTS_KEY, JSON.stringify(contacts));
+  }
+}
+
 // Get internal parts from localStorage
 export function getInternalParts(): string[] {
-  if (typeof window === 'undefined') return [];
-  const parts = localStorage.getItem('internalParts');
+  if (Platform.OS !== 'web' || typeof globalThis === 'undefined' || !('localStorage' in globalThis)) {
+    return ['Anxious Self', 'Future Self', 'Confident Self'];
+  }
+  const parts = globalThis.localStorage.getItem('internalParts');
   return parts ? JSON.parse(parts) : ['Anxious Self', 'Future Self', 'Confident Self'];
 }
 
@@ -337,12 +509,20 @@ export function getLabelContacts(): Array<{ id: string; name: string; phoneNumbe
 
 // Save internal parts to localStorage
 export function saveInternalParts(parts: string[]): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem('internalParts', JSON.stringify(parts));
+  if (Platform.OS !== 'web' || typeof globalThis === 'undefined' || !('localStorage' in globalThis)) {
+    return;
+  }
+  globalThis.localStorage.setItem('internalParts', JSON.stringify(parts));
 }
 
 // Update recording with internal part
 export async function updateRecordingInternalPart(id: string, internalPart: string): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const recordings = await readAsyncList<Recording>(RECORDINGS_KEY);
+    const updated = recordings.map((rec) => (rec.id === id ? { ...rec, internalPart } : rec));
+    await writeAsyncList(RECORDINGS_KEY, updated);
+    return;
+  }
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['recordings'], 'readwrite');
@@ -374,6 +554,10 @@ export interface UserProfile {
 
 // Save profile picture to IndexedDB (larger storage quota)
 async function saveProfilePicture(picture: string): Promise<void> {
+  if (Platform.OS !== 'web') {
+    await AsyncStorage.setItem(USER_PROFILE_PICTURE_KEY, picture);
+    return;
+  }
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(['recordings'], 'readwrite');
@@ -387,6 +571,9 @@ async function saveProfilePicture(picture: string): Promise<void> {
 // Get profile picture from IndexedDB
 async function getProfilePicture(): Promise<string | null> {
   try {
+    if (Platform.OS !== 'web') {
+      return await AsyncStorage.getItem(USER_PROFILE_PICTURE_KEY);
+    }
     const db = await initDB();
     return new Promise((resolve) => {
       const transaction = db.transaction(['recordings'], 'readonly');
@@ -403,8 +590,11 @@ async function getProfilePicture(): Promise<string | null> {
 }
 
 export async function saveUserProfile(profile: UserProfile): Promise<void> {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    // Save profile picture to IndexedDB if present
+  if (Platform.OS !== 'web') {
+    await AsyncStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
+    return;
+  }
+  if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
     if (profile.profilePicture) {
       try {
         await saveProfilePicture(profile.profilePicture);
@@ -412,20 +602,23 @@ export async function saveUserProfile(profile: UserProfile): Promise<void> {
         console.error('Failed to save profile picture:', error);
       }
     }
-    
-    // Save basic info to localStorage (without picture)
+
     const basicProfile = {
       name: profile.name,
       bio: profile.bio,
       phoneNumber: profile.phoneNumber,
     };
-    localStorage.setItem('userProfile', JSON.stringify(basicProfile));
+    globalThis.localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(basicProfile));
   }
 }
 
 export async function getUserProfile(): Promise<UserProfile | null> {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    const data = localStorage.getItem('userProfile');
+  if (Platform.OS !== 'web') {
+    const data = await AsyncStorage.getItem(USER_PROFILE_KEY);
+    return data ? JSON.parse(data) : null;
+  }
+  if (typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+    const data = globalThis.localStorage.getItem(USER_PROFILE_KEY);
     if (data) {
       const basicProfile = JSON.parse(data);
       // Try to get profile picture from IndexedDB
@@ -440,8 +633,8 @@ export async function getUserProfile(): Promise<UserProfile | null> {
 }
 
 export function hasCompletedSetup(): boolean {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    return localStorage.getItem('userProfile') !== null;
+  if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+    return globalThis.localStorage.getItem(USER_PROFILE_KEY) !== null;
   }
   return false;
 }
@@ -564,6 +757,47 @@ export async function syncMessagesToYou2(): Promise<number> {
 // Fix isSelf values for existing messages
 export async function fixMessageOrientation(): Promise<number> {
   try {
+    if (Platform.OS !== 'web') {
+      const messages = await readAsyncList<ChatMessage>(CHAT_MESSAGES_KEY);
+      let fixedCount = 0;
+
+      const updatedMessages = messages.map((message) => {
+        let needsUpdate = false;
+        let newIsSelf = message.isSelf;
+
+        if (message.conversationId === 'you' && message.isAudio && message.isSelf === true) {
+          newIsSelf = false;
+          needsUpdate = true;
+        }
+
+        if (message.conversationId === 'you2' && message.isAudio && message.isSelf === false) {
+          newIsSelf = true;
+          needsUpdate = true;
+        }
+
+        if (message.text?.includes('Call ended')) {
+          if (message.conversationId === 'you' && message.isSelf === true) {
+            newIsSelf = false;
+            needsUpdate = true;
+          }
+          if (message.conversationId === 'you2' && message.isSelf === false) {
+            newIsSelf = true;
+            needsUpdate = true;
+          }
+        }
+
+        if (needsUpdate) {
+          fixedCount++;
+          return { ...message, isSelf: newIsSelf };
+        }
+        return message;
+      });
+
+      if (fixedCount > 0) {
+        await writeAsyncList(CHAT_MESSAGES_KEY, updatedMessages);
+      }
+      return fixedCount;
+    }
     const db = await initDB();
     const transaction = db.transaction(['chatMessages'], 'readwrite');
     const store = transaction.objectStore('chatMessages');

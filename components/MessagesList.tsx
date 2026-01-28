@@ -1,9 +1,11 @@
 import { useTheme } from '@/contexts/ThemeContext';
 import { ChatMessage, fixMessageOrientation, getConversationPreview, getUserProfile, migrateCallsToChat, syncMessagesToYou2 } from '@/utils/storage';
+import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { Bell, ChevronRight, MessageSquare, Search, Settings, StickyNote } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 interface Conversation {
   id: string;
@@ -119,6 +121,81 @@ export default function MessagesList({ onSelectConversation }: MessagesListProps
   const getInitials = (name: string) => {
     return name.slice(0, 2).toUpperCase();
   };
+
+  if (Platform.OS !== 'web') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Messages</Text>
+          <Pressable onPress={() => router.push('/settings')} style={styles.iconButton}>
+            <Feather name="settings" size={18} color="#9ca3af" />
+          </Pressable>
+        </View>
+        <View style={styles.searchRow}>
+          <Feather name="search" size={16} color="#6b7280" />
+          <TextInput
+            placeholder="Search"
+            placeholderTextColor="#6b7280"
+            style={styles.searchInput}
+          />
+        </View>
+        <ScrollView contentContainerStyle={styles.list}>
+          {conversations.length === 0 ? (
+            <View style={styles.empty}>
+              <Feather name="message-circle" size={28} color="#6b7280" />
+              <Text style={styles.emptyText}>No conversations</Text>
+            </View>
+          ) : (
+            conversations.map((conversation) => (
+              <Pressable
+                key={conversation.id}
+                style={styles.item}
+                onPress={() => onSelectConversation(conversation.id)}
+              >
+                {conversation.id === 'you' && userProfilePic ? (
+                  <Image source={{ uri: userProfilePic }} style={styles.avatar} />
+                ) : conversation.id === 'you2' ? (
+                  <View style={styles.avatar}>
+                    <Feather name="heart" size={20} color="#fff" />
+                  </View>
+                ) : conversation.id === 'notes' ? (
+                  <View style={styles.avatar}>
+                    <Feather name="file-text" size={20} color="#fff" />
+                  </View>
+                ) : conversation.id === 'reminders' ? (
+                  <View style={styles.avatar}>
+                    <Feather name="bell" size={20} color="#fff" />
+                  </View>
+                ) : (
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>{getInitials(conversation.name)}</Text>
+                  </View>
+                )}
+                <View style={styles.itemBody}>
+                  <View style={styles.itemHeader}>
+                    <Text style={styles.itemTitle}>{conversation.name}</Text>
+                    {conversation.lastMessageTime ? (
+                      <Text style={styles.itemTime}>{formatTime(conversation.lastMessageTime)}</Text>
+                    ) : null}
+                  </View>
+                  <Text style={styles.itemPreview} numberOfLines={1}>
+                    {conversation.lastMessage?.text || 'No messages yet'}
+                  </Text>
+                </View>
+                {(conversation.unreadCount ?? 0) > 0 ? (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>
+                      {conversation.unreadCount! > 99 ? '99+' : conversation.unreadCount}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            ))
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
     <div className={`flex flex-col min-h-screen ${theme === 'dark' ? 'bg-black text-white' : 'bg-white text-gray-900'}`}>
@@ -249,3 +326,114 @@ export default function MessagesList({ onSelectConversation }: MessagesListProps
     </div>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+    paddingTop: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  searchInput: {
+    flex: 1,
+    color: '#fff',
+    paddingVertical: 0,
+  },
+  list: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+  },
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(59, 130, 246, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '500',
+  },
+  itemBody: {
+    flex: 1,
+  },
+  itemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  itemTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  itemTime: {
+    color: '#6b7280',
+    fontSize: 12,
+  },
+  itemPreview: {
+    color: '#9ca3af',
+    fontSize: 13,
+  },
+  badge: {
+    minWidth: 24,
+    paddingHorizontal: 6,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#3b82f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  empty: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    color: '#9ca3af',
+    marginTop: 8,
+  },
+});

@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 // @ts-ignore
 import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
 
 export interface RecordingResult {
   id: string;
@@ -51,11 +52,21 @@ export function useCrossPlatformRecorder() {
       const recording = recordingRef.current;
       if (!recording) return null;
       await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
       const id = Date.now().toString();
+      const uri = recording.getURI();
+      let finalUri = uri;
+      if (uri && FileSystem.documentDirectory) {
+        const targetUri = `${FileSystem.documentDirectory}recording-${id}.m4a`;
+        try {
+          await FileSystem.moveAsync({ from: uri, to: targetUri });
+          finalUri = targetUri;
+        } catch (error) {
+          console.warn('Failed to move recording file, using temp uri', error);
+        }
+      }
       setRecordingId(id);
-      setAudioData(uri);
-      return { id, audioData: uri, duration };
+      setAudioData(finalUri);
+      return { id, audioData: finalUri ?? '', duration };
     } catch (e) {
       console.error('Failed to stop recording', e);
       return null;

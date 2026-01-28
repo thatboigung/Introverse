@@ -1,12 +1,15 @@
 import { useTheme } from '@/contexts/ThemeContext';
-import { getUserProfile, saveUserProfile } from '@/utils/storage';
+import { clearAllUserData, getUserProfile, saveUserProfile } from '@/utils/storage';
 import { useRouter } from 'expo-router';
-import { Bell, BellOff, Camera, ChevronRight, Info, LogOut, Moon, Shield, Sun, User } from 'lucide-react';
+import { Bell, BellOff, Camera, ChevronRight, Info, LogOut, Shield, User } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { Feather } from '@expo/vector-icons';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { theme, toggleTheme } = useTheme();
+  const { theme } = useTheme();
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -15,6 +18,10 @@ export default function SettingsScreen() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showLegal, setShowLegal] = useState(false);
+  const [showRemoveAds, setShowRemoveAds] = useState(false);
+  const [showCoupon, setShowCoupon] = useState(false);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponDescription, setCouponDescription] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -36,8 +43,8 @@ export default function SettingsScreen() {
   };
 
   const loadSettings = () => {
-    if (typeof window !== 'undefined') {
-      const notifications = localStorage.getItem('notificationsEnabled');
+    if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+      const notifications = globalThis.localStorage.getItem('notificationsEnabled');
       setNotificationsEnabled(notifications !== 'false');
     }
   };
@@ -85,6 +92,28 @@ export default function SettingsScreen() {
     }
   };
 
+  const pickNativeImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission required', 'Please allow photo library access.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+      base64: true,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    const asset = result.assets[0];
+    if (asset.base64) {
+      setProfilePicture(`data:image/jpeg;base64,${asset.base64}`);
+    } else if (asset.uri) {
+      setProfilePicture(asset.uri);
+    }
+  };
+
   const handleSaveProfile = async () => {
     if (!name.trim()) {
       setSuccessMessage('Please enter your name');
@@ -107,26 +136,205 @@ export default function SettingsScreen() {
   const handleToggleNotifications = () => {
     const newValue = !notificationsEnabled;
     setNotificationsEnabled(newValue);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('notificationsEnabled', String(newValue));
+    if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && 'localStorage' in globalThis) {
+      globalThis.localStorage.setItem('notificationsEnabled', String(newValue));
     }
   };
 
+  const performLogout = async () => {
+    await clearAllUserData();
+    setShowLogoutConfirm(false);
+    if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && 'location' in globalThis) {
+      globalThis.location.href = '/';
+      return;
+    }
+    router.replace('/');
+  };
+
   const handleLogout = () => {
+    if (Platform.OS !== 'web') {
+      Alert.alert('Logout', 'This will clear all data on this device.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Logout', style: 'destructive', onPress: performLogout },
+      ]);
+      return;
+    }
     if (showLogoutConfirm) {
-      if (typeof window !== 'undefined') {
-        localStorage.clear();
-      }
-      // Clear IndexedDB
-      if (typeof window !== 'undefined' && window.indexedDB) {
-        indexedDB.deleteDatabase('InroCallDB');
-      }
-      // Redirect to profile setup (it will show since localStorage is cleared)
-      window.location.href = '/';
+      void performLogout();
     } else {
       setShowLogoutConfirm(true);
     }
   };
+
+  if (Platform.OS !== 'web') {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()}>
+            <Text style={styles.link}>Back</Text>
+          </Pressable>
+          <Text style={styles.headerTitle}>Settings</Text>
+          <Pressable onPress={handleSaveProfile}>
+            <Text style={styles.link}>Save</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Profile</Text>
+          <Pressable style={styles.avatarButton} onPress={pickNativeImage}>
+            {profilePicture ? (
+              <Image source={{ uri: profilePicture }} style={styles.avatar} />
+            ) : (
+              <View style={styles.avatar}>
+                <Feather name="user" size={32} color="#fff" />
+              </View>
+            )}
+            <Text style={styles.avatarHint}>Tap to change photo</Text>
+          </Pressable>
+
+          <Text style={styles.label}>Name</Text>
+          <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="Your name" placeholderTextColor="#6b7280" />
+
+          <Text style={styles.label}>Bio</Text>
+          <TextInput value={bio} onChangeText={setBio} style={[styles.input, styles.textarea]} placeholder="Tell us about yourself" placeholderTextColor="#6b7280" multiline />
+
+          <Text style={styles.label}>Phone Number</Text>
+          <View style={styles.readonly}>
+            <Text style={styles.readonlyText}>{phoneNumber}</Text>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>App Settings</Text>
+          <Pressable style={styles.row} onPress={handleToggleNotifications}>
+            <Text style={styles.rowText}>Notifications</Text>
+            <View style={[styles.toggle, notificationsEnabled ? styles.toggleOn : null]} />
+          </Pressable>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Information</Text>
+          <Pressable style={styles.row} onPress={() => setShowAbout(true)}>
+            <Text style={styles.rowText}>About IntroVerse</Text>
+          </Pressable>
+          <Pressable style={styles.row} onPress={() => setShowLegal(true)}>
+            <Text style={styles.rowText}>Legal</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Support</Text>
+          <Pressable style={styles.row} onPress={() => setShowRemoveAds(true)}>
+            <Text style={styles.rowText}>Remove ads forever • $1</Text>
+          </Pressable>
+          <Pressable style={styles.row} onPress={() => setShowCoupon(true)}>
+            <Text style={styles.rowText}>Already purchased</Text>
+          </Pressable>
+        </View>
+
+        <Pressable style={styles.logout} onPress={handleLogout}>
+          <Text style={styles.logoutText}>Logout</Text>
+        </Pressable>
+
+        <Modal visible={showAbout} transparent animationType="fade" onRequestClose={() => setShowAbout(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>About IntroVerse</Text>
+              <Text style={styles.modalText}>
+                IntroVerse helps you explore internal dialogues with yourself.
+              </Text>
+              <Text style={styles.modalText}>
+                Build habits through reminders, reflect on recordings, and organize conversations with different
+                parts of yourself in a safe, personal space.
+              </Text>
+              <Text style={styles.modalText}>Version 1.0.0</Text>
+              <Pressable style={styles.modalButton} onPress={() => setShowAbout(false)}>
+                <Text style={styles.modalButtonText}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showLegal} transparent animationType="fade" onRequestClose={() => setShowLegal(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Legal</Text>
+              <Text style={styles.modalText}>All data is stored locally on your device.</Text>
+              <Text style={styles.modalText}>
+                We do not collect, transmit, or sell your personal information. Deleting the app removes your data.
+              </Text>
+              <Text style={styles.modalText}>
+                IntroVerse is for personal reflection and is not a substitute for professional mental health care.
+              </Text>
+              <Pressable style={styles.modalButton} onPress={() => setShowLegal(false)}>
+                <Text style={styles.modalButtonText}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showRemoveAds} transparent animationType="fade" onRequestClose={() => setShowRemoveAds(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Remove Ads Forever • $1</Text>
+              <Text style={styles.modalText}>
+                Enjoy a cleaner experience with no interruptions. Removing ads keeps your focus on your reflections
+                and makes the app feel smoother and more personal.
+              </Text>
+              <Pressable style={styles.modalButton} onPress={() => setShowRemoveAds(false)}>
+                <Text style={styles.modalButtonText}>Ok</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showCoupon} transparent animationType="fade" onRequestClose={() => setShowCoupon(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Already purchased</Text>
+              <Text style={styles.modalText}>
+                Enter the coupon code sent to your email to restore your purchase.
+              </Text>
+              <TextInput
+                value={couponCode}
+                onChangeText={setCouponCode}
+                placeholder="Coupon code"
+                placeholderTextColor="#6b7280"
+                style={styles.modalInput}
+                autoCapitalize="characters"
+              />
+              <TextInput
+                value={couponDescription}
+                onChangeText={setCouponDescription}
+                placeholder="Description (optional)"
+                placeholderTextColor="#6b7280"
+                style={[styles.modalInput, styles.textarea]}
+                multiline
+              />
+              <Pressable style={styles.modalButton} onPress={() => setShowCoupon(false)}>
+                <Text style={styles.modalButtonText}>Submit</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showSuccess} transparent animationType="fade" onRequestClose={() => setShowSuccess(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.successCard}>
+              <View style={styles.successIcon}>
+                <Feather name="check" size={22} color="#0f172a" />
+              </View>
+              <Text style={styles.successTitle}>Saved</Text>
+              <Text style={styles.successText}>{successMessage}</Text>
+              <Pressable style={styles.successButton} onPress={() => setShowSuccess(false)}>
+                <Text style={styles.successButtonText}>Done</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      </ScrollView>
+    );
+  }
 
   return (
     <div className={`flex flex-col min-h-screen ${theme === 'dark' ? 'bg-black' : 'bg-white'} ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
@@ -270,31 +478,6 @@ export default function SettingsScreen() {
               </div>
             </button>
 
-            {/* Dark/Light Mode Toggle */}
-            <button
-              onClick={toggleTheme}
-              className={`w-full px-6 py-4 flex items-center justify-between ${theme === 'dark' ? 'hover:bg-white/5' : 'hover:bg-gray-100'} active:bg-white/10 transition-colors border-t ${theme === 'dark' ? 'border-gray-800/50' : 'border-gray-200'}`}
-            >
-              <div className="flex items-center gap-3">
-                {theme === 'dark' ? (
-                  <Moon size={20} className="text-purple-400" />
-                ) : (
-                  <Sun size={20} className="text-yellow-400" />
-                )}
-                <span className={theme === 'dark' ? 'text-white' : 'text-gray-900'}>Dark Mode</span>
-              </div>
-              <div
-                className={`w-12 h-7 rounded-full transition-colors ${
-                  theme === 'dark' ? 'bg-purple-600' : 'bg-gray-700'
-                }`}
-              >
-                <div
-                  className={`w-5 h-5 bg-white rounded-full mt-1 transition-transform ${
-                    theme === 'dark' ? 'ml-6' : 'ml-1'
-                  }`}
-                ></div>
-              </div>
-            </button>
           </div>
 
           {/* Information */}
@@ -321,6 +504,31 @@ export default function SettingsScreen() {
               <div className="flex items-center gap-3">
                 <Shield size={20} className="text-purple-400" />
                 <span className={theme === 'dark' ? 'text-white' : 'text-gray-900'}>Legal</span>
+              </div>
+              <ChevronRight size={20} className="text-gray-600" />
+            </button>
+          </div>
+
+          {/* Support */}
+          <div className="mb-4">
+            <h2 className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'} px-6 pt-6 pb-3`}>Support</h2>
+            <button
+              onClick={() => setShowRemoveAds(true)}
+              className={`w-full px-6 py-4 flex items-center justify-between ${theme === 'dark' ? 'hover:bg-white/5' : 'hover:bg-gray-100'} active:bg-white/10 transition-colors`}
+            >
+              <div className="flex items-center gap-3">
+                <Bell size={20} className="text-blue-400" />
+                <span className={theme === 'dark' ? 'text-white' : 'text-gray-900'}>Remove ads forever • $1</span>
+              </div>
+              <ChevronRight size={20} className="text-gray-600" />
+            </button>
+            <button
+              onClick={() => setShowCoupon(true)}
+              className={`w-full px-6 py-4 flex items-center justify-between ${theme === 'dark' ? 'hover:bg-white/5' : 'hover:bg-gray-100'} active:bg-white/10 transition-colors border-t ${theme === 'dark' ? 'border-gray-800/50' : 'border-gray-200'}`}
+            >
+              <div className="flex items-center gap-3">
+                <Bell size={20} className="text-blue-400" />
+                <span className={theme === 'dark' ? 'text-white' : 'text-gray-900'}>Already purchased</span>
               </div>
               <ChevronRight size={20} className="text-gray-600" />
             </button>
@@ -364,6 +572,10 @@ export default function SettingsScreen() {
               parts of yourself. Through internal dialogues and reflective calls, you can connect with your
               conscious mind, subconscious, and various internal parts.
             </p>
+            <p className="text-gray-400 text-sm leading-relaxed mb-4">
+              Use reminders to stay consistent, save recordings to revisit insights, and keep your self-talk
+              organized by context and intention.
+            </p>
             <p className="text-gray-400 text-sm leading-relaxed mb-6">
               Version 1.0.0
             </p>
@@ -395,6 +607,9 @@ export default function SettingsScreen() {
                 All your data is stored locally on your device. We do not collect, transmit, or store any personal
                 information on external servers.
               </p>
+              <p className="text-gray-400 text-sm leading-relaxed mt-2">
+                Deleting the app removes your local data. You are responsible for any backups you choose to make.
+              </p>
             </div>
 
             <div className="mb-6">
@@ -403,6 +618,9 @@ export default function SettingsScreen() {
                 IntroVerse is provided as-is for personal use. This app is not a substitute for professional mental
                 health services. If you need support, please contact a licensed professional.
               </p>
+              <p className="text-gray-400 text-sm leading-relaxed mt-2">
+                By using this app, you agree to use it responsibly and keep your device secure.
+              </p>
             </div>
 
             <button
@@ -410,6 +628,66 @@ export default function SettingsScreen() {
               className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl transition-colors"
             >
               Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showRemoveAds && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={() => setShowRemoveAds(false)}
+        >
+          <div
+            className={`${theme === 'dark' ? 'bg-gray-900' : 'bg-white'} border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'} rounded-3xl p-6 max-w-md w-full`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className={`text-xl font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'} mb-4`}>Remove Ads Forever • $1</h3>
+            <p className="text-gray-400 text-sm leading-relaxed mb-6">
+              Enjoy a cleaner experience with no interruptions. Removing ads keeps your focus on your reflections
+              and makes the app feel smoother and more personal.
+            </p>
+            <button
+              onClick={() => setShowRemoveAds(false)}
+              className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl transition-colors"
+            >
+              Ok
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showCoupon && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={() => setShowCoupon(false)}
+        >
+          <div
+            className={`${theme === 'dark' ? 'bg-gray-900' : 'bg-white'} border ${theme === 'dark' ? 'border-gray-800' : 'border-gray-200'} rounded-3xl p-6 max-w-md w-full`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className={`text-xl font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'} mb-4`}>Already purchased</h3>
+            <p className="text-gray-400 text-sm leading-relaxed mb-4">
+              Enter the coupon code sent to your email to restore your purchase.
+            </p>
+            <input
+              value={couponCode}
+              onChange={(e) => setCouponCode(e.target.value)}
+              placeholder="Coupon code"
+              className={`w-full px-4 py-3 ${theme === 'dark' ? 'bg-gray-800/50 text-white' : 'bg-gray-100 text-gray-900'} rounded-xl placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 mb-3`}
+            />
+            <textarea
+              value={couponDescription}
+              onChange={(e) => setCouponDescription(e.target.value)}
+              placeholder="Description (optional)"
+              rows={3}
+              className={`w-full px-4 py-3 ${theme === 'dark' ? 'bg-gray-800/50 text-white' : 'bg-gray-100 text-gray-900'} rounded-xl placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 mb-6`}
+            />
+            <button
+              onClick={() => setShowCoupon(false)}
+              className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-xl transition-colors"
+            >
+              Submit
             </button>
           </div>
         </div>
@@ -446,3 +724,182 @@ export default function SettingsScreen() {
     </div>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
+    backgroundColor: '#000',
+    padding: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  link: {
+    color: '#3b82f6',
+    fontSize: 14,
+  },
+  section: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  avatarButton: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  avatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: 'rgba(147, 51, 234, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarHint: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginTop: 8,
+  },
+  label: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  input: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    marginBottom: 12,
+  },
+  textarea: {
+    minHeight: 80,
+  },
+  readonly: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  readonlyText: {
+    color: '#9ca3af',
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  rowText: {
+    color: '#fff',
+  },
+  toggle: {
+    width: 36,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#374151',
+  },
+  toggleOn: {
+    backgroundColor: '#2563eb',
+  },
+  logout: {
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  logoutText: {
+    color: '#f87171',
+    fontWeight: '600',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: '#111827',
+    borderRadius: 20,
+    padding: 20,
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  modalText: {
+    color: '#cbd5f5',
+    fontSize: 13,
+    marginBottom: 12,
+  },
+  modalButton: {
+    backgroundColor: '#2563eb',
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  successCard: {
+    width: '86%',
+    maxWidth: 320,
+    alignSelf: 'center',
+    backgroundColor: '#0b0b0b',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+  },
+  successIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#60a5fa',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  successTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  successText: {
+    color: '#cbd5f5',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  successButton: {
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    backgroundColor: '#1d4ed8',
+    alignItems: 'center',
+  },
+  successButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+});

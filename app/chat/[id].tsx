@@ -1,6 +1,6 @@
 import ChatDetail from '@/components/ChatDetail';
 import { getUserProfile } from '@/utils/storage';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 
 export default function ChatRoute() {
@@ -32,11 +32,14 @@ export default function ChatRoute() {
   }
 
   return (
-    <ChatDetail
-      conversationId={conversationId}
-      contactName={contactName}
-      onBack={() => router.back()}
-    />
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <ChatDetail
+        conversationId={conversationId}
+        contactName={contactName}
+        onBack={() => router.back()}
+      />
+    </>
   );
 }
 
